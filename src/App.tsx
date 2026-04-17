@@ -21,11 +21,26 @@ function App() {
       minTrackingConfidence: 0.5,
     });
 
-    pose.onResults((results: any) => {
-      if (results.poseLandmarks) {
-         console.log("📍 LANDMARKS:", results.poseLandmarks);
-      }
+     pose.onResults((results: any) => {
+    if (!results.poseLandmarks) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!ctx) return;
+
+    // temizle
+    ctx.clearRect(0, 0, 360, 640);
+
+    // 🔴 noktaları çiz
+    results.poseLandmarks.forEach((lm: any) => {
+      ctx.beginPath();
+      ctx.arc(lm.x * 360, lm.y * 640, 3, 0, 2 * Math.PI);
+      ctx.fillStyle = "red";
+      ctx.fill();
     });
+
+    console.log("📍 LANDMARKS:", results.poseLandmarks);
+  });
 
     poseRef.current = pose;
 
@@ -100,12 +115,17 @@ function App() {
               onPlay={processFrame}
             />
 
-            <canvas
-              ref={canvasRef}
-              width="480"
-              height="854"
-              style={{ display: "none" }}
-            />
+           <canvas
+  ref={canvasRef}
+  width="360"
+  height="640"
+  style={{
+    position: "absolute",
+    top: 0,
+    left: 0,
+    pointerEvents: "none",
+  }}
+/>
           </>
         )}
       </div>

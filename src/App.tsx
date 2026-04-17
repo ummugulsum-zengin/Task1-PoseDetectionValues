@@ -1,158 +1,116 @@
-/*import { useEffect, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 
-export default function App() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+function App() {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const poseRef = useRef<any>(null);
 
   useEffect(() => {
-    async function start() {
-      const video = videoRef.current;
-      if (!video) return;
+    if (!(window as any).Pose) return;
 
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
+    const pose = new (window as any).Pose({
+      locateFile: (file: string) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
 
-        console.log("stream ok");
+    pose.setOptions({
+      modelComplexity: 0,
+      smoothLandmarks: true,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
 
-        video.srcObject = stream;
-
-        // 🔥 EN KRİTİK FIX
-        await new Promise<void>((resolve) => {
-          video.onloadedmetadata = () => resolve();
-        });
-
-        console.log("metadata ready");
-
-        await video.play().catch((e) => {
-          console.log("play blocked:", e);
-        });
-
-        console.log("camera playing");
-      } catch (err) {
-        console.error("CAMERA FAIL:", err);
+    pose.onResults((results: any) => {
+      if (results.poseLandmarks) {
+         console.log("📍 LANDMARKS:", results.poseLandmarks);
       }
-    }
+    });
 
-    start();
+    poseRef.current = pose;
+
+    // 🔥 PRELOAD
+    const preload = async () => {
+      const dummyCanvas = document.createElement("canvas");
+      dummyCanvas.width = 10;
+      dummyCanvas.height = 10;
+
+      await pose.send({ image: dummyCanvas });
+      console.log("🚀 Model preload edildi");
+    };
+
+    preload();
   }, []);
 
-  return (
-    <div style={{ textAlign: "center" }}>
-      <h2>Camera Test ONLY</h2>
+  const processFrame = async () => {
+    if (!poseRef.current) {
+      console.warn("Model henüz yüklenmedi, bekleniyor...");
+      requestAnimationFrame(processFrame);
+      return;
+    }
 
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        style={{
-          width: 640,
-          height: 480,
-          background: "black",
-        }}
-      />
-    </div>
-  );
-}
-  */
+    if (
+      videoRef.current &&
+      canvasRef.current &&
+      poseRef.current &&
+      !videoRef.current.paused
+    ) {
+      const ctx = canvasRef.current.getContext("2d");
 
+      if (ctx) {
+        ctx.drawImage(
+          videoRef.current,
+          0,
+          0,
+          canvasRef.current.width,
+          canvasRef.current.height
+        );
 
-import { useEffect, useRef } from "react";
-import {
-  PoseLandmarker,
-  FilesetResolver,
-  DrawingUtils,
-} from "@mediapipe/tasks-vision";
-
-export default function App() {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
-  useEffect(() => {
-    let poseLandmarker: PoseLandmarker;
-    let lastVideoTime = -1;
-
-    async function start() {
-      const video = videoRef.current!;
-      const canvas = canvasRef.current!;
-      const ctx = canvas.getContext("2d")!;
-      const drawingUtils = new DrawingUtils(ctx);
-
-      // 🔥 MODEL YÜKLE
-      const vision = await FilesetResolver.forVisionTasks(
-        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
-      );
-
-      poseLandmarker = await PoseLandmarker.createFromOptions(vision, {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-        numPoses: 1,
-      });
-
-      console.log("MODEL READY");
-
-      // 🔥 KAMERA
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      video.srcObject = stream;
-
-      await video.play();
-      console.log("CAMERA READY");
-
-      // 🔥 LOOP
-      async function detect() {
-        const now = performance.now();
-
-        if (video.currentTime !== lastVideoTime) {
-          lastVideoTime = video.currentTime;
-
-          const result = poseLandmarker.detectForVideo(video, now);
-
-          // ✅ SENİN İSTEDİĞİN LOG
-          console.log("LANDMARKS:", result.landmarks);
-
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-          for (const landmarks of result.landmarks) {
-            drawingUtils.drawLandmarks(landmarks);
-            drawingUtils.drawConnectors(
-              landmarks,
-              PoseLandmarker.POSE_CONNECTIONS
-            );
-          }
+        try {
+          await poseRef.current.send({ image: canvasRef.current });
+        } catch (err) {
+          console.error("MediaPipe gönderim hatası:", err);
         }
-
-        requestAnimationFrame(detect);
       }
 
-      detect();
+      requestAnimationFrame(processFrame);
     }
+  };
 
-    start();
-  }, []);
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) setVideoSrc(URL.createObjectURL(file));
+  };
 
   return (
-    <div>
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        width={640}
-        height={480}
-        style={{ position: "absolute" }}
-      />
+    <div style={{ textAlign: "center", padding: "20px" }}>
+      <h2>Fitness AI: 4K Video Fix</h2>
 
-      <canvas
-        ref={canvasRef}
-        width={640}
-        height={480}
-        style={{ position: "absolute" }}
-      />
+      <input type="file" accept="video/*" onChange={handleFileChange} />
+
+      <div style={{ marginTop: "20px" }}>
+        {videoSrc && (
+          <>
+            <video
+              ref={videoRef}
+              src={videoSrc}
+              width="360"
+              height="640"
+              controls
+              onPlay={processFrame}
+            />
+
+            <canvas
+              ref={canvasRef}
+              width="480"
+              height="854"
+              style={{ display: "none" }}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
+
+export default App;

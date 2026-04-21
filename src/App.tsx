@@ -1,134 +1,125 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useState, useEffect } from "react";
+import {
+  PoseLandmarker,
+  FilesetResolver,
+} from "@mediapipe/tasks-vision";
 
 function App() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const detectorRef = useRef<PoseLandmarker | null>(null);
   const [videoSrc, setVideoSrc] = useState<string | null>(null);
-  const poseRef = useRef<any>(null);
 
+  // ---------------- INIT MODEL ----------------
   useEffect(() => {
-    if (!(window as any).Pose) return;
+    const init = async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
+      );
 
-    const pose = new (window as any).Pose({
-      locateFile: (file: string) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
-    });
+      detectorRef.current = await PoseLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task",
+        },
+        runningMode: "VIDEO",
+        numPoses: 1,
+      });
 
-    pose.setOptions({
-      modelComplexity: 0,
-      smoothLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
-    });
-
-     pose.onResults((results: any) => {
-    if (!results.poseLandmarks) return;
-
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (!ctx) return;
-
-    // temizle
-    ctx.clearRect(0, 0, 360, 640);
-
-    // 🔴 noktaları çiz
-    results.poseLandmarks.forEach((lm: any) => {
-      ctx.beginPath();
-      ctx.arc(lm.x * 360, lm.y * 640, 3, 0, 2 * Math.PI);
-      ctx.fillStyle = "red";
-      ctx.fill();
-    });
-
-    console.log("📍 LANDMARKS:", results.poseLandmarks);
-  });
-
-    poseRef.current = pose;
-
-    // 🔥 PRELOAD
-    const preload = async () => {
-      const dummyCanvas = document.createElement("canvas");
-      dummyCanvas.width = 10;
-      dummyCanvas.height = 10;
-
-      await pose.send({ image: dummyCanvas });
-      console.log("🚀 Model preload edildi");
+      console.log("🚀 Model loaded");
     };
 
-    preload();
+    init();
   }, []);
 
-  const processFrame = async () => {
-    if (!poseRef.current) {
-      console.warn("Model henüz yüklenmedi, bekleniyor...");
+  // ---------------- PROCESS FRAME ----------------
+  const processFrame = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const detector = detectorRef.current;
+
+    if (!video || !canvas || !detector) {
       requestAnimationFrame(processFrame);
       return;
     }
 
-    if (
-      videoRef.current &&
-      canvasRef.current &&
-      poseRef.current &&
-      !videoRef.current.paused
-    ) {
-      const ctx = canvasRef.current.getContext("2d");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-      if (ctx) {
-        ctx.drawImage(
-          videoRef.current,
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const result = detector.detectForVideo(video, performance.now());
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    if (result.landmarks.length > 0) {
+      const landmarks = result.landmarks[0];
+
+      // draw points
+      landmarks.forEach((lm) => {
+        ctx.beginPath();
+        ctx.arc(
+          lm.x * canvas.width,
+          lm.y * canvas.height,
+          4,
           0,
-          0,
-          canvasRef.current.width,
-          canvasRef.current.height
+          2 * Math.PI
         );
+        ctx.fillStyle = "red";
+        ctx.fill();
+      });
+    }
 
-        try {
-          await poseRef.current.send({ image: canvasRef.current });
-        } catch (err) {
-          console.error("MediaPipe gönderim hatası:", err);
-        }
-      }
-
+    if (!video.paused) {
       requestAnimationFrame(processFrame);
     }
   };
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
+  // ---------------- FILE ----------------
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (file) setVideoSrc(URL.createObjectURL(file));
   };
 
   return (
-    <div style={{ textAlign: "center", padding: "20px" }}>
-      <h2>Fitness AI: 4K Video Fix</h2>
+    <div style={{ textAlign: "center", padding: 20 }}>
+      <h2>MediaPipe Pose (NEW VERSION)</h2>
 
       <input type="file" accept="video/*" onChange={handleFileChange} />
 
-      <div style={{ marginTop: "20px" }}>
-        {videoSrc && (
-          <>
-            <video
-              ref={videoRef}
-              src={videoSrc}
-              width="360"
-              height="640"
-              controls
-              onPlay={processFrame}
-            />
+      {videoSrc && (
+        <div
+          style={{
+            position: "relative",
+            width: 360,
+            height: 640,
+            margin: "0 auto",
+          }}
+        >
+          <video
+            ref={videoRef}
+            src={videoSrc}
+            width={360}
+            height={640}
+            controls
+            onPlay={processFrame}
+            style={{ position: "absolute", top: 0, left: 0 }}
+          />
 
-           <canvas
-  ref={canvasRef}
-  width="360"
-  height="640"
-  style={{
-    position: "absolute",
-    top: 0,
-    left: 0,
-    pointerEvents: "none",
-  }}
-/>
-          </>
-        )}
-      </div>
+          <canvas
+            ref={canvasRef}
+            width={360}
+            height={640}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              pointerEvents: "none",
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
